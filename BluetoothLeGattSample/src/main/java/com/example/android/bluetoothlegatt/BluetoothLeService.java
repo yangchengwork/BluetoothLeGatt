@@ -33,6 +33,8 @@ import android.os.IBinder;
 import android.util.Log;
 
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 
 /**
@@ -66,6 +68,11 @@ public class BluetoothLeService extends Service {
     public final static UUID UUID_HEART_RATE_MEASUREMENT =
             UUID.fromString(SampleGattAttributes.HEART_RATE_MEASUREMENT);
 
+    public final static UUID UUID_ALERT_LEVEL =
+            UUID.fromString(SampleGattAttributes.CLIENT_ALERT_LEVEL);
+
+    private Timer mRssiTimer;
+
     // Implements callback methods for GATT events that the app cares about.  For example,
     // connection change and services discovered.
     private final BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
@@ -76,6 +83,15 @@ public class BluetoothLeService extends Service {
                 intentAction = ACTION_GATT_CONNECTED;
                 mConnectionState = STATE_CONNECTED;
                 broadcastUpdate(intentAction);
+                TimerTask task = new TimerTask() {
+                    @Override
+                    public void run() {
+                        mBluetoothGatt.readRemoteRssi();
+                    }
+                };
+                mRssiTimer = new Timer();
+                mRssiTimer.schedule(task, 1000, 1000);
+
                 Log.i(TAG, "Connected to GATT server.");
                 // Attempts to discover services after successful connection.
                 Log.i(TAG, "Attempting to start service discovery:" +
@@ -83,6 +99,7 @@ public class BluetoothLeService extends Service {
 
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 intentAction = ACTION_GATT_DISCONNECTED;
+                mRssiTimer.cancel();
                 mConnectionState = STATE_DISCONNECTED;
                 Log.i(TAG, "Disconnected from GATT server.");
                 broadcastUpdate(intentAction);
@@ -112,6 +129,16 @@ public class BluetoothLeService extends Service {
                                             BluetoothGattCharacteristic characteristic) {
             broadcastUpdate(ACTION_DATA_AVAILABLE, characteristic);
         }
+
+        @Override
+        public void onReadRemoteRssi (BluetoothGatt gatt, int rssi, int status) {
+            // Log.d(TAG, String.format("rssi = %d", rssi));
+        }
+
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            // Log.d(TAG, "e");
+        }
     };
 
     private void broadcastUpdate(final String action) {
@@ -123,22 +150,22 @@ public class BluetoothLeService extends Service {
                                  final BluetoothGattCharacteristic characteristic) {
         final Intent intent = new Intent(action);
 
+        int format = -1;
+        format = BluetoothGattCharacteristic.FORMAT_UINT16;
+        Log.d(TAG, "Heart rate format UINT16.");
         // This is special handling for the Heart Rate Measurement profile.  Data parsing is
         // carried out as per profile specifications:
         // http://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.heart_rate_measurement.xml
         if (UUID_HEART_RATE_MEASUREMENT.equals(characteristic.getUuid())) {
             int flag = characteristic.getProperties();
-            int format = -1;
-            if ((flag & 0x01) != 0) {
-                format = BluetoothGattCharacteristic.FORMAT_UINT16;
-                Log.d(TAG, "Heart rate format UINT16.");
-            } else {
+            if ((flag & 0x01) == 0) {
                 format = BluetoothGattCharacteristic.FORMAT_UINT8;
                 Log.d(TAG, "Heart rate format UINT8.");
             }
             final int heartRate = characteristic.getIntValue(format, 1);
             Log.d(TAG, String.format("Received heart rate: %d", heartRate));
             intent.putExtra(EXTRA_DATA, String.valueOf(heartRate));
+            // This is specific to Reporter.
         } else {
             // For all other profiles, writes the data formatted in HEX.
             final byte[] data = characteristic.getValue();
@@ -303,6 +330,7 @@ public class BluetoothLeService extends Service {
             descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
             mBluetoothGatt.writeDescriptor(descriptor);
         }
+
     }
 
     /**
@@ -316,4 +344,13 @@ public class BluetoothLeService extends Service {
 
         return mBluetoothGatt.getServices();
     }
+
+    public void writeCharacteristic(BluetoothGattCharacteristic characteristic) {
+        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
+            Log.w(TAG, "BluetoothAdapter not initialized");
+            return;
+        }
+        mBluetoothGatt.writeCharacteristic(characteristic);
+    }
+
 }
