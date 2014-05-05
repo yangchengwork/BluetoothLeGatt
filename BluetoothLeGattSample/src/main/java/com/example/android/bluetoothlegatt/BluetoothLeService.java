@@ -115,6 +115,9 @@ public class BluetoothLeService extends Service {
             }
         }
 
+
+        
+
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt,
                                          BluetoothGattCharacteristic characteristic,
